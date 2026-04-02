@@ -1,0 +1,35 @@
+# Bağımlılıklar
+node_modules/
+jspm_packages/
+package-lock.json
+yarn.lock
+
+# Log dosyaları
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ortam değişkenleri (Özel anahtarlar ve şifreler)
+.env
+.env.test
+.env.local
+
+# IDE ve Editör ayarları
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# macOS sistem dosyaları
+.DS_Store
+
+# Derleme çıktıları (Eğer TypeScript kullanırsan)
+dist/
+out/
+resources/epub/*.epub
+library.db
