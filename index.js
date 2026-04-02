@@ -1,79 +1,64 @@
 const express = require("express");
-const { initDB } = require("./src/config/db");
-const User = require("./src/models/User");
-const { list } = require("@vercel/blob"); // Vercel Blob için
-const Pusher = require("pusher");
-
+const { put, list, del } = require("@vercel/blob"); // Vercel Blob araçları
 const app = express();
 
-// Büyük dosya transferleri (Base64) için limitleri artırıyoruz
+// Büyük dosya transferi için limitler
 app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-// Pusher Yapılandırması
-const pusher = new Pusher({
-  appId: process.env.PUSHER_APP_ID,
-  key: process.env.PUSHER_KEY,
-  secret: process.env.PUSHER_SECRET,
-  cluster: process.env.PUSHER_CLUSTER,
-  useTLS: true,
-});
-
-initDB();
-
-// --- 1. KAYITLI KİTAPLARI LİSTELE (Vercel Blob'dan) ---
-app.get("/books", async (req, res) => {
-  try {
-    // Vercel Blob üzerindeki tüm dosyaları listeler
-    const { blobs } = await list();
-    const epubs = blobs.filter((b) => b.pathname.endsWith(".epub"));
-    res.json(
-      epubs.map((b) => ({
-        name: b.pathname,
-        url: b.url, // Android doğrudan bu URL'den indirebilir
-        size: b.size,
-      })),
-    );
-  } catch (e) {
-    res.status(500).json({ error: "Blob listesi alınamadı: " + e.message });
-  }
-});
-
-// --- 2. GMAIL'DEN GELEN ANLIK KİTAP (Tünel Modeli) ---
+// --- 1. GMAIL'DEN GELEN KİTABI "INBOX"A KOY ---
 app.post("/ingest-email-book", async (req, res) => {
   try {
     const { userId, fileName, fileBlob } = req.body;
 
-    if (!userId || !fileBlob) {
-      return res.status(400).json({ error: "Veri eksik." });
-    }
+    // Base64 veriyi binary (Buffer) formatına çevir
+    const buffer = Buffer.from(fileBlob, "base64");
 
-    // Dosyayı sunucuya kaydetmiyoruz, RAM'den Pusher'a basıyoruz
-    await pusher.trigger(`user-${userId}`, "new-book", {
-      file: fileBlob, // Base64 EPUB verisi
-      name: fileName,
+    // Vercel Blob'da 'inbox/userId/kitap-adi.epub' yoluna kaydet
+    // 'addRandomSuffix: false' yapıyoruz ki dosya adı temiz kalsın
+    const blob = await put(`inbox/${userId}/${fileName}`, buffer, {
+      access: "public",
+      addRandomSuffix: false,
     });
 
-    res.json({ status: "ok", message: "Kitap kullanıcıya iletildi." });
+    console.log(`Yeni kitap inbox'a eklendi: ${fileName}`);
+    res.json({ status: "ok", url: blob.url });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// --- 3. KULLANICI İŞLEMLERİ ---
-app.get("/users", (req, res) => {
-  User.getAll((err, rows) => res.json(rows));
+// --- 2. ANDROID İÇİN "GELEN KUTUSU" SORGULAMA ---
+app.get("/check-inbox", async (req, res) => {
+  try {
+    const { userId } = req.query; // Örn: /check-inbox?userId=admin
+
+    // Blob içindeki 'inbox/userId/' ile başlayan dosyaları listele
+    const { blobs } = await list({ prefix: `inbox/${userId}/` });
+
+    res.json(
+      blobs.map((b) => ({
+        name: b.pathname.split("/").pop(), // Sadece dosya adını al
+        url: b.url,
+        size: b.size,
+      })),
+    );
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.post("/update-progress", (req, res) => {
-  User.updateProgress(req.body, (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ status: "ok" });
-  });
+// --- 3. KİTAP İNDİRİLDİKTEN SONRA SİLME (OPSİYONEL) ---
+// Android kitabı başarıyla indirdiğinde bu endpoint'i çağırıp sunucuyu temizleyebilir
+app.delete("/remove-from-inbox", async (req, res) => {
+  try {
+    const { fileUrl } = req.query;
+    await del(fileUrl);
+    res.json({ status: "deleted" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.listen(PORT, "0.0.0.0", () =>
-  console.log(`Server running on port ${PORT}`),
-);
+app.listen(PORT, () => console.log(`Relay Server running on port ${PORT}`));
