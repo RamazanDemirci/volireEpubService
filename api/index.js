@@ -1,64 +1,77 @@
-const express = require("express");
-const { put, list, del } = require("@vercel/blob"); // Vercel Blob araçları
-const app = express();
+import express from "express";
+import sql from "./db.js";
 
-// Büyük dosya transferi için limitler
+const app = express();
 app.use(express.json({ limit: "50mb" }));
 
-const PORT = process.env.PORT || 3000;
-
-// --- 1. GMAIL'DEN GELEN KİTABI "INBOX"A KOY ---
-app.post("/ingest-email-book", async (req, res) => {
+// --- PROFİL VE AYARLARI GETİR ---
+app.get("/get-profile", async (req, res) => {
+  const { userId } = req.query;
   try {
-    const { userId, fileName, fileBlob } = req.body;
+    const users = await sql`
+            SELECT id, name, current_theme as "currentTheme", current_font_size as "currentFontSize"
+            FROM users WHERE id = ${userId}
+        `;
+    if (users.length === 0)
+      return res.status(404).json({ error: "User not found" });
+    res.json(users[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    // Base64 veriyi binary (Buffer) formatına çevir
-    const buffer = Buffer.from(fileBlob, "base64");
+// --- KİTAP İLERLEMESİNİ GETİR ---
+app.get("/get-progress", async (req, res) => {
+  const { userId, bookId } = req.query;
+  try {
+    const progress = await sql`
+            SELECT last_chapter as "lastChapter", last_index as "lastIndex"
+            FROM user_progress 
+            WHERE user_id = ${userId} AND book_id = ${bookId}
+            LIMIT 1
+        `;
 
-    // Vercel Blob'da 'inbox/userId/kitap-adi.epub' yoluna kaydet
-    // 'addRandomSuffix: false' yapıyoruz ki dosya adı temiz kalsın
-    const blob = await put(`inbox/${userId}/${fileName}`, buffer, {
-      access: "public",
-      addRandomSuffix: false,
+    // Eğer kayıt yoksa varsayılan olarak 0,0 dönüyoruz (Android hata almasın diye)
+    res.json(progress[0] || { lastChapter: 0, lastIndex: 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- TÜM VERİLERİ SENKRONİZE ET (SAVE) ---
+app.post("/sync-all", async (req, res) => {
+  const { userId, bookId, lastChapter, lastIndex, settings } = req.body;
+
+  try {
+    // Transaction (İşlem Grubu) kullanarak iki tabloyu aynı anda güncelliyoruz
+    await sql.begin(async (sql) => {
+      // 1. Kullanıcı Genel Ayarları Güncelle
+      await sql`
+                UPDATE users SET 
+                    current_theme = ${settings.theme},
+                    current_font_size = ${settings.fontSize}
+                WHERE id = ${userId}
+            `;
+
+      // 2. Kitap İlerlemesini Kaydet (Yoksa ekle, varsa güncelle)
+      await sql`
+                INSERT INTO user_progress (user_id, book_id, last_chapter, last_index, updated_at)
+                VALUES (${userId}, ${bookId}, ${lastChapter}, ${lastIndex}, NOW())
+                ON CONFLICT (user_id, book_id) 
+                DO UPDATE SET 
+                    last_chapter = EXCLUDED.last_chapter,
+                    last_index = EXCLUDED.last_index,
+                    updated_at = NOW()
+            `;
     });
 
-    console.log(`Yeni kitap inbox'a eklendi: ${fileName}`);
-    res.json({ status: "ok", url: blob.url });
+    res.json({ status: "success", message: "Sync completed" });
   } catch (e) {
+    console.error("Sync Error:", e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// --- 2. ANDROID İÇİN "GELEN KUTUSU" SORGULAMA ---
-app.get("/check-inbox", async (req, res) => {
-  try {
-    const { userId } = req.query; // Örn: /check-inbox?userId=admin
-
-    // Blob içindeki 'inbox/userId/' ile başlayan dosyaları listele
-    const { blobs } = await list({ prefix: `inbox/${userId}/` });
-
-    res.json(
-      blobs.map((b) => ({
-        name: b.pathname.split("/").pop(), // Sadece dosya adını al
-        url: b.url,
-        size: b.size,
-      })),
-    );
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// --- 3. KİTAP İNDİRİLDİKTEN SONRA SİLME (OPSİYONEL) ---
-// Android kitabı başarıyla indirdiğinde bu endpoint'i çağırıp sunucuyu temizleyebilir
-app.delete("/remove-from-inbox", async (req, res) => {
-  try {
-    const { fileUrl } = req.query;
-    await del(fileUrl);
-    res.json({ status: "deleted" });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.listen(PORT, () => console.log(`Relay Server running on port ${PORT}`));
+// Port Dinleme
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
