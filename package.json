@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "EPUB Relay and Metadata Service",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
@@ -10,7 +11,10 @@
   "dependencies": {
     "@vercel/blob": "^2.3.3",
     "express": "^5.2.1",
-    "pusher": "^5.3.3",
-    "sqlite3": "^6.0.1"
+    "postgres": "^3.4.4",
+    "pusher": "^5.3.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   }
 }
