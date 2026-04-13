@@ -61,5 +61,27 @@ app.post("/sync-all", async (req, res) => {
   }
 });
 
+app.post("/ingest-email-book", async (req, res) => {
+  const { userId, fileName, fileBlob } = req.body;
+
+  if (!userId || !fileName || !fileBlob) {
+    return res.status(400).json({ error: "Missing data" });
+  }
+
+  try {
+    console.log(`Processing book: ${fileName} for user: ${userId}`);
+
+    // İşlem mantığı buraya gelecek (Örn: S3 upload veya başka bir servis yönlendirmesi)
+
+    res.json({
+      status: "success",
+      message: `Book ${fileName} received`,
+    });
+  } catch (e) {
+    console.error("Ingest Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
