@@ -1,30 +1,38 @@
-import { put } from "@vercel/blob";
+import { list, put } from "@vercel/blob"; // <--- 'list' buraya eklendi
 import express from "express";
 import sql from "../src/config/db.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
+// --- 0. CHECK-INBOX (Düzeltildi) ---
 app.get("/check-inbox", async (req, res) => {
   try {
-    const { userId } = req.query; // Örn: /check-inbox?userId=admin
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
 
-    // Blob içindeki 'inbox/userId/' ile başlayan dosyaları listele
+    // Vercel Blob listeleme
     const { blobs } = await list({ prefix: `inbox/${userId}/` });
 
-    res.json(
-      blobs.map((b) => ({
-        name: b.pathname.split("/").pop(), // Sadece dosya adını al
+    // Android tarafındaki BookResponse modeline uygun eşleme
+    const results = blobs.map((b) => {
+      const fileName = b.pathname.split("/").pop();
+      return {
+        id: fileName.replace(".epub", "").replace(/\s/g, "_"), // Android id bekliyor
+        name: fileName,
         url: b.url,
         size: b.size,
-      })),
-    );
+      };
+    });
+
+    res.json(results);
   } catch (e) {
+    console.error("List Error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// --- 1. GMAIL EPUB INGEST (Eklendi: DB Kaydı) ---
+// --- 1. GMAIL EPUB INGEST ---
 app.post("/ingest-email-book", async (req, res) => {
   const { userId, fileName, fileBlob } = req.body;
   if (!userId || !fileName || !fileBlob)
@@ -37,8 +45,9 @@ app.post("/ingest-email-book", async (req, res) => {
       contentType: "application/epub+zip",
     });
 
-    // KRİTİK: Kitabı veritabanına kaydet ki /check-inbox sorgusunda gelebilsin
-    const bookId = fileName.replace(".epub", "").replace(/\s/g, "_"); // ID temizliği
+    // Opsiyonel: Veritabanına da işlemek istersen burada bırakabilirsin
+    // Ama /check-inbox artık doğrudan Blob'dan okuduğu için DB zorunlu değil
+    const bookId = fileName.replace(".epub", "").replace(/\s/g, "_");
     await sql`
       INSERT INTO user_books (user_id, book_id, file_name, file_url)
       VALUES (${userId}, ${bookId}, ${fileName}, ${blob.url})
@@ -59,7 +68,7 @@ app.post("/sync/settings", async (req, res) => {
       UPDATE users SET 
         current_theme = ${readingMode}, 
         current_font_size = ${wordDisplayCount},
-        updated_at = ${new Date(timestamp)}
+        updated_at = ${timestamp ? new Date(timestamp) : new Date()}
       WHERE id = ${userId}
     `;
     res.json({ status: "success", message: "Settings synced" });
@@ -74,7 +83,7 @@ app.post("/sync/progress", async (req, res) => {
   try {
     await sql`
       INSERT INTO user_progress (user_id, book_id, last_chapter, last_index, updated_at)
-      VALUES (${userId}, ${bookId}, ${lastPartIndex}, ${lastWordIndex}, ${new Date(timestamp)})
+      VALUES (${userId}, ${bookId}, ${lastPartIndex}, ${lastWordIndex}, ${timestamp ? new Date(timestamp) : new Date()})
       ON CONFLICT (user_id, book_id) 
       DO UPDATE SET 
         last_chapter = EXCLUDED.last_chapter,
