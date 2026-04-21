@@ -5,28 +5,21 @@ import sql from "../src/config/db.js";
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
-// --- [YENİ] 0. KİTAP LİSTESİNİ GETİR (Android: check-inbox) ---
-// Android'in 404 aldığı ve "Toplam Remote Kitap: 0" dediği yer burası.
 app.get("/check-inbox", async (req, res) => {
-  const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: "userId is required" });
-
   try {
-    // Veritabanında yüklenen kitapların tutulduğu tabloyu sorguluyoruz.
-    // 'user_books' tablosu olduğunu varsayıyorum (Yoksa oluşturmalısınız).
-    const books = await sql`
-      SELECT 
-        book_id as "id", 
-        file_name as "name", 
-        file_url as "url"
-      FROM user_books 
-      WHERE user_id = ${userId}
-    `;
+    const { userId } = req.query; // Örn: /check-inbox?userId=admin
 
-    // Bulunan kitapları liste olarak döndür (Android modeline uygun)
-    res.json(books || []);
+    // Blob içindeki 'inbox/userId/' ile başlayan dosyaları listele
+    const { blobs } = await list({ prefix: `inbox/${userId}/` });
+
+    res.json(
+      blobs.map((b) => ({
+        name: b.pathname.split("/").pop(), // Sadece dosya adını al
+        url: b.url,
+        size: b.size,
+      })),
+    );
   } catch (e) {
-    console.error("Inbox Fetch Error:", e);
     res.status(500).json({ error: e.message });
   }
 });
