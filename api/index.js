@@ -8,29 +8,19 @@ app.use(express.json({ limit: "50mb" }));
 // --- [YENİ] 1. INBOX KİTAPLARINI GETİR (Android: getInboxBooks) ---
 // Android'in 404 aldığı yer burasıydı.
 app.get("/check-inbox", async (req, res) => {
-  const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: "userId is required" });
-
   try {
-    // NOT: Burada 'user_books' veya 'inbox' tablonuzun adını kontrol edin.
-    // Şimdilik user_progress veya ayrı bir books tablosundan veri döndüğünü varsayıyoruz.
-    const books = await sql`
-      SELECT 
-        book_id as "id", 
-        book_name as "name", 
-        file_url as "url", 
-        file_size as "size"
-      FROM user_books 
-      WHERE user_id = ${userId}
-    `;
+    const { userId } = req.query; // Örn: /check-inbox?userId=admin
 
-    // Android her zaman bir liste bekler (boş olsa bile)
-    res.json(books || []);
-  } catch (e) {
-    console.error("Inbox Error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
+    // Blob içindeki 'inbox/userId/' ile başlayan dosyaları listele
+    const { blobs } = await list({ prefix: `inbox/${userId}/` });
+
+    res.json(
+      blobs.map((b) => ({
+        name: b.pathname.split("/").pop(), // Sadece dosya adını al
+        url: b.url,
+        size: b.size,
+      })),
+    );
 
 // --- 2. AYARLARI SENKRONİZE ET (Android: syncSettings) ---
 app.post("/sync/settings", async (req, res) => {
