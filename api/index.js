@@ -1,27 +1,46 @@
+import { put } from "@vercel/blob";
 import express from "express";
 import sql from "../src/config/db.js";
-import { put } from "@vercel/blob";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
-// --- 1. AYARLARI SENKRONİZE ET (Android: syncSettings) ---
+// --- [YENİ] 1. INBOX KİTAPLARINI GETİR (Android: getInboxBooks) ---
+// Android'in 404 aldığı yer burasıydı.
+app.get("/check-inbox", async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: "userId is required" });
+
+  try {
+    // NOT: Burada 'user_books' veya 'inbox' tablonuzun adını kontrol edin.
+    // Şimdilik user_progress veya ayrı bir books tablosundan veri döndüğünü varsayıyoruz.
+    const books = await sql`
+      SELECT 
+        book_id as "id", 
+        book_name as "name", 
+        file_url as "url", 
+        file_size as "size"
+      FROM user_books 
+      WHERE user_id = ${userId}
+    `;
+
+    // Android her zaman bir liste bekler (boş olsa bile)
+    res.json(books || []);
+  } catch (e) {
+    console.error("Inbox Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- 2. AYARLARI SENKRONİZE ET (Android: syncSettings) ---
 app.post("/sync/settings", async (req, res) => {
-  const {
-    userId,
-    readingMode,
-    isSmartBreak,
-    readingWpm,
-    wordDisplayCount,
-    language,
-    timestamp,
-  } = req.body;
+  const { userId, readingMode, wordDisplayCount, timestamp } = req.body;
   try {
     await sql`
       UPDATE users SET 
         current_theme = ${readingMode}, 
         current_font_size = ${wordDisplayCount},
-        updated_at = ${new Date(timestamp)}
+        updated_at = ${timestamp ? new Date(timestamp) : new Date()}
       WHERE id = ${userId}
     `;
     res.json({ status: "success", message: "Settings synced" });
@@ -30,13 +49,13 @@ app.post("/sync/settings", async (req, res) => {
   }
 });
 
-// --- 2. İLERLEMEYİ KAYDET (Android: syncProgress) ---
+// --- 3. İLERLEMEYİ KAYDET (Android: syncProgress) ---
 app.post("/sync/progress", async (req, res) => {
   const { userId, bookId, lastPartIndex, lastWordIndex, timestamp } = req.body;
   try {
     await sql`
       INSERT INTO user_progress (user_id, book_id, last_chapter, last_index, updated_at)
-      VALUES (${userId}, ${bookId}, ${lastPartIndex}, ${lastWordIndex}, ${new Date(timestamp)})
+      VALUES (${userId}, ${bookId}, ${lastPartIndex}, ${lastWordIndex}, ${timestamp ? new Date(timestamp) : new Date()})
       ON CONFLICT (user_id, book_id) 
       DO UPDATE SET 
         last_chapter = EXCLUDED.last_chapter,
@@ -49,7 +68,7 @@ app.post("/sync/progress", async (req, res) => {
   }
 });
 
-// --- 3. İLERLEMEYİ GETİR (Android: getProgress) ---
+// --- 4. İLERLEMEYİ GETİR (Android: getProgress) ---
 app.get("/sync/progress", async (req, res) => {
   const { userId, bookId } = req.query;
   try {
@@ -64,7 +83,7 @@ app.get("/sync/progress", async (req, res) => {
   }
 });
 
-// --- 4. GMAIL EPUB INGEST ---
+// --- 5. GMAIL EPUB INGEST ---
 app.post("/ingest-email-book", async (req, res) => {
   const { userId, fileName, fileBlob } = req.body;
   if (!userId || !fileName || !fileBlob)
@@ -76,6 +95,13 @@ app.post("/ingest-email-book", async (req, res) => {
       access: "public",
       contentType: "application/epub+zip",
     });
+
+    // İSTEĞE BAĞLI: Yüklenen kitabı user_books tablosuna da kaydet ki /check-inbox'ta çıksın
+    await sql`
+      INSERT INTO user_books (user_id, book_id, book_name, file_url, created_at)
+      VALUES (${userId}, ${fileName.replace(".epub", "")}, ${fileName}, ${blob.url}, NOW())
+    `;
+
     res.json({ status: "success", url: blob.url });
   } catch (e) {
     res.status(500).json({ error: e.message });
