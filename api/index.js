@@ -31,23 +31,40 @@ app.put("/profile/:id", async (req, res) => {
 
 app.get("/check-inbox", async (req, res) => {
   try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).json({ error: "userId is required" });
+    const { userId } = req.query; // Örn: test@gmail.com
+    if (!userId) return res.status(400).json({ error: "userId gerekli" });
 
-    const { blobs } = await list({ prefix: `inbox/${userId}/` });
+    const { blobs } = await list({
+      prefix: `inbox/${userId.toLowerCase().trim()}/`,
+    });
 
-    const results = blobs.map((b) => {
-      const fileName = b.pathname.split("/").pop();
+    if (blobs.length === 0) return res.json([]);
+
+    const fileIds = blobs.map((b) =>
+      b.pathname.split("/").pop().replace(".epub", ""),
+    );
+
+    const metadataRecords = await sql`
+      SELECT id, original_name as name 
+      FROM book_metadata 
+      WHERE id IN ${sql(fileIds)}
+    `;
+
+    const results = blobs.map((blob) => {
+      const uuid = blob.pathname.split("/").pop().replace(".epub", "");
+      const meta = metadataRecords.find((m) => m.id === uuid);
+
       return {
-        id: fileName.replace(".epub", "").replace(/\s/g, "_"),
-        name: fileName,
-        url: b.url,
-        size: b.size,
+        id: uuid,
+        name: meta ? meta.name : "Bilinmeyen Kitap", // DB'de varsa gerçek adı, yoksa fallback
+        url: blob.url,
+        size: blob.size,
       };
     });
 
     res.json(results);
   } catch (e) {
+    console.error("Inbox Hatası:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
