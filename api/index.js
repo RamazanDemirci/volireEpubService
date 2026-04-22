@@ -1,6 +1,7 @@
 import { del, list } from "@vercel/blob";
 import express from "express";
 import sql from "../src/config/db.js";
+import { accountService } from "../src/services/accountService.js";
 import { bookService } from "../src/services/bookService.js";
 
 const app = express();
