@@ -1,9 +1,32 @@
-import { del, list, put } from "@vercel/blob";
+import { del, list } from "@vercel/blob";
 import express from "express";
 import sql from "../src/config/db.js";
+import { bookService } from "../src/services/bookService.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
+
+app.post("/auth/sync", async (req, res) => {
+  try {
+    const { email, displayName } = req.body;
+    if (!email) return res.status(400).json({ error: "Email required" });
+
+    const data = await accountService.syncAccount(email, displayName);
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- PROFILE UPDATE ---
+app.put("/profile/:id", async (req, res) => {
+  try {
+    const updated = await accountService.updateProfile(req.params.id, req.body);
+    res.json(updated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get("/check-inbox", async (req, res) => {
   try {
@@ -51,25 +74,18 @@ app.delete("/remove-from-inbox", async (req, res) => {
 
 app.post("/ingest-email-book", async (req, res) => {
   const { userId, fileName, fileBlob } = req.body;
-  if (!userId || !fileName || !fileBlob)
-    return res.status(400).json({ error: "Missing data" });
+
+  if (!userId || !fileName || !fileBlob) {
+    return res
+      .status(400)
+      .json({ error: "Eksik veri: userId, fileName veya fileBlob gerekli." });
+  }
 
   try {
-    const buffer = Buffer.from(fileBlob, "base64");
-    const blob = await put(`inbox/${userId}/${fileName}`, buffer, {
-      access: "public",
-      contentType: "application/epub+zip",
-    });
-
-    const bookId = fileName.replace(".epub", "").replace(/\s/g, "_");
-    await sql`
-      INSERT INTO user_books (user_id, book_id, file_name, file_url)
-      VALUES (${userId}, ${bookId}, ${fileName}, ${blob.url})
-      ON CONFLICT (user_id, book_id) DO UPDATE SET file_url = EXCLUDED.file_url
-    `;
-
-    res.json({ status: "success", url: blob.url });
+    const result = await bookService.ingestBook(userId, fileName, fileBlob);
+    res.json({ status: "success", ...result });
   } catch (e) {
+    console.error("Ingest Error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

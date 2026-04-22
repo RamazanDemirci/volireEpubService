@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vercel/blob": "^2.3.3",
+    "adm-zip": "^0.5.17",
     "express": "^5.2.1",
     "postgres": "^3.4.4",
     "pusher": "^5.3.3"

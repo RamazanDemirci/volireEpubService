@@ -1,8 +1,7 @@
 import postgres from "postgres";
 
-const connectionString = process.env.DATABASE_URL;
-const sql = postgres(connectionString, {
-  ssl: "require", // Supabase güvenli bağlantı için şarttır
+const sql = postgres(process.env.DATABASE_URL, {
+  ssl: "require",
   idle_timeout: 20,
   max_lifetime: 60 * 30,
 });
