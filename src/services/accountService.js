@@ -2,8 +2,9 @@ import sql from "../config/db.js";
 
 export const accountService = {
   async syncAccount(email, displayName) {
-    // 1. Account bul veya oluştur (LDAP / Silent Login)
-    let [account] = await sql`SELECT * FROM accounts WHERE email = ${email}`;
+    // 1. Account bul veya oluştur
+    let [account] =
+      await sql`SELECT * FROM accounts WHERE id = ${email} OR email = ${email}`;
 
     if (!account) {
       [account] = await sql`
@@ -11,12 +12,11 @@ export const accountService = {
         VALUES (${email}, ${email}, ${displayName || email})
         RETURNING *
       `;
-
-      // İlk kez oluşturuluyorsa varsayılan bir profil ekle
+      // Yeni kullanıcıya ilk profil
       await this.createProfile(account.id, "Ana Profil", 1);
     }
 
-    // 2. Bu hesaba ait tüm profilleri çek
+    // 2. Profilleri çek (Android modelleriyle %100 uyumlu alias'lar kullanıldı)
     const profiles = await sql`
       SELECT 
         id, 
@@ -32,11 +32,10 @@ export const accountService = {
       WHERE account_id = ${account.id}
     `;
 
-    // 3. Android'in beklediği AccountSyncResponse formatında dön
     return {
       account: {
         id: account.id,
-        email: account.email,
+        email: account.email || account.id,
         display_name: account.display_name,
         last_used_profile_id: account.last_used_profile_id,
       },
@@ -65,7 +64,6 @@ export const accountService = {
   },
 
   async updateProfile(profileId, data) {
-    // JSONB alanlarını koruyarak güncelleme yap
     const [updated] = await sql`
       UPDATE profiles SET
         name = ${data.name || sql`name`},
