@@ -54,17 +54,21 @@ app.put("/profile/:id", async (req, res) => {
 // --- INBOX & BOOKS ---
 app.get("/check-inbox", async (req, res) => {
   try {
-    const { userId } = req.query;
+    const { userId } = req.query; // Android buradan "email/profileId" gönderecek
     if (!userId) return res.status(400).json({ error: "userId gerekli" });
 
-    const { blobs } = await list({
-      prefix: `inbox/${userId.toLowerCase().trim()}/`,
-    });
+    // Prefix: inbox/email/profileId/
+    const prefix = `inbox/${userId.trim()}/`;
+    console.log("Aranan Klasör:", prefix);
+
+    const { blobs } = await list({ prefix: prefix });
+
     if (blobs.length === 0) return res.json([]);
 
     const fileIds = blobs.map((b) =>
       b.pathname.split("/").pop().replace(".epub", ""),
     );
+
     const metadataRecords = await sql`
       SELECT id, original_name as name FROM book_metadata WHERE id IN ${sql(fileIds)}
     `;
