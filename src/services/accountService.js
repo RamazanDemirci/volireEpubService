@@ -1,47 +1,79 @@
 import sql from "../config/db.js";
 
 export const accountService = {
-  // Kullanıcı giriş yaptığında (veya uygulama açıldığında) çalışır
   async syncAccount(email, displayName) {
-    return await sql.begin(async (sql) => {
-      // 1. Account var mı kontrol et, yoksa oluştur (LDAP mantığı)
-      const [account] = await sql`
-        INSERT INTO accounts (id, display_name)
-        VALUES (${email}, ${displayName})
-        ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+    // 1. Account bul veya oluştur (LDAP / Silent Login)
+    let [account] = await sql`SELECT * FROM accounts WHERE email = ${email}`;
+
+    if (!account) {
+      [account] = await sql`
+        INSERT INTO accounts (id, email, display_name)
+        VALUES (${email}, ${email}, ${displayName || email})
         RETURNING *
       `;
 
-      // 2. Hesaba bağlı profilleri getir
-      let profiles =
-        await sql`SELECT * FROM profiles WHERE account_id = ${email}`;
+      // İlk kez oluşturuluyorsa varsayılan bir profil ekle
+      await this.createProfile(account.id, "Ana Profil", 1);
+    }
 
-      // 3. Eğer hiç profil yoksa (Yeni kullanıcı), "Ana Profil" oluştur
-      if (profiles.length === 0) {
-        const [newProfile] = await sql`
-          INSERT INTO profiles (id, account_id, name, avatar_id)
-          VALUES (${`profile_${Date.now()}`}, ${email}, 'Ana Profil', 1)
-          RETURNING *
-        `;
-        profiles = [newProfile];
+    // 2. Bu hesaba ait tüm profilleri çek
+    const profiles = await sql`
+      SELECT 
+        id, 
+        account_id as "accountId", 
+        name, 
+        avatar_id as "avatarResId", 
+        settings, 
+        reader_params as "readerParams", 
+        last_book_id as "lastBookId",
+        library_book_ids as "libraryBookIds",
+        book_progress_map as "bookProgressMap"
+      FROM profiles 
+      WHERE account_id = ${account.id}
+    `;
 
-        // Account tablosunda son kullanılan profili güncelle
-        await sql`UPDATE accounts SET last_used_profile_id = ${newProfile.id} WHERE id = ${email}`;
-      }
+    // 3. Android'in beklediği AccountSyncResponse formatında dön
+    return {
+      account: {
+        id: account.id,
+        email: account.email,
+        display_name: account.display_name,
+        last_used_profile_id: account.last_used_profile_id,
+      },
+      profiles: profiles || [],
+    };
+  },
 
-      return { account, profiles };
-    });
+  async createProfile(accountId, name, avatarId = 1) {
+    const [newProfile] = await sql`
+      INSERT INTO profiles (
+        id, account_id, name, avatar_id, 
+        settings, reader_params, library_book_ids, book_progress_map
+      ) VALUES (
+        ${"profile_" + Date.now()}, 
+        ${accountId}, 
+        ${name}, 
+        ${avatarId}, 
+        ${sql.json({})}, 
+        ${sql.json({})}, 
+        ${sql.array([])}, 
+        ${sql.json({})}
+      )
+      RETURNING *
+    `;
+    return newProfile;
   },
 
   async updateProfile(profileId, data) {
-    const { name, settings, reader_params, last_book_id } = data;
+    // JSONB alanlarını koruyarak güncelleme yap
     const [updated] = await sql`
       UPDATE profiles SET
-        name = COALESCE(${name}, name),
-        settings = ${settings ? JSON.stringify(settings) : sql`settings`},
-        reader_params = ${reader_params ? JSON.stringify(reader_params) : sql`reader_params`},
-        last_book_id = COALESCE(${last_book_id}, last_book_id),
-        updated_at = NOW()
+        name = ${data.name || sql`name`},
+        settings = ${data.settings ? sql.json(data.settings) : sql`settings`},
+        reader_params = ${data.reader_params ? sql.json(data.reader_params) : sql`reader_params`},
+        last_book_id = ${data.last_book_id || sql`last_book_id`},
+        library_book_ids = ${data.library_book_ids ? sql.array(data.library_book_ids) : sql`library_book_ids`},
+        book_progress_map = ${data.book_progress_map ? sql.json(data.book_progress_map) : sql`book_progress_map`}
       WHERE id = ${profileId}
       RETURNING *
     `;
