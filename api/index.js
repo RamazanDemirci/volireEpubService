@@ -1,8 +1,8 @@
-import { del, list } from "@vercel/blob";
+import { del, list, put } from "@vercel/blob";
+import crypto from "crypto";
 import express from "express";
 import sql from "../src/config/db.js";
 import { accountService } from "../src/services/accountService.js";
-import { bookService } from "../src/services/bookService.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -54,13 +54,10 @@ app.put("/profile/:id", async (req, res) => {
 // --- INBOX & BOOKS ---
 app.get("/check-inbox", async (req, res) => {
   try {
-    const { userId } = req.query; // Android buradan "email/profileId" gönderecek
+    const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: "userId gerekli" });
 
-    // Prefix: inbox/email/profileId/
     const prefix = `inbox/${userId.trim()}/`;
-    console.log("Aranan Klasör:", prefix);
-
     const { blobs } = await list({ prefix: prefix });
 
     if (blobs.length === 0) return res.json([]);
@@ -105,13 +102,42 @@ app.delete("/remove-from-inbox", async (req, res) => {
 });
 
 app.post("/ingest-email-book", async (req, res) => {
-  const { userId, fileName, fileBlob } = req.body;
-  if (!userId || !fileName || !fileBlob)
-    return res.status(400).json({ error: "Missing data" });
+  const { email, fileName, fileBlob } = req.body;
+  if (!email || !fileName || !fileBlob)
+    return res
+      .status(400)
+      .json({ error: "Missing data (email, fileName, fileBlob)" });
 
   try {
-    const result = await bookService.ingestBook(userId, fileName, fileBlob);
-    res.json({ status: "success", ...result });
+    const targetEmail = email.toLowerCase().trim();
+    const profiles = await sql`
+      SELECT id FROM profiles 
+      WHERE account_id = ${targetEmail} 
+      ORDER BY created_at ASC LIMIT 1
+    `;
+
+    if (profiles.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "Profile not found for this email" });
+    }
+
+    const mainProfileId = profiles[0].id;
+    const uuid = crypto.randomUUID();
+    const blobPath = `inbox/${targetEmail}/${mainProfileId}/${uuid}.epub`;
+
+    const buffer = Buffer.from(fileBlob, "base64");
+    const blob = await put(blobPath, buffer, {
+      access: "public",
+      contentType: "application/epub+zip",
+    });
+
+    await sql`
+      INSERT INTO book_metadata (id, original_name, url)
+      VALUES (${uuid}, ${fileName}, ${blob.url})
+    `;
+
+    res.json({ status: "success", profileId: mainProfileId, path: blobPath });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -119,7 +145,7 @@ app.post("/ingest-email-book", async (req, res) => {
 
 // --- LEGACY SYNC SUPPORT ---
 app.post("/sync/settings", async (req, res) => {
-  const { userId, readingMode, wordDisplayCount, timestamp } = req.body;
+  const { userId, timestamp } = req.body;
   try {
     await sql`UPDATE accounts SET updated_at = ${timestamp ? new Date(timestamp) : new Date()} WHERE id = ${userId}`;
     res.json({ status: "success" });
