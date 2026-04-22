@@ -1,24 +1,21 @@
-import { list, put } from "@vercel/blob"; // <--- 'list' buraya eklendi
+import { del, list, put } from "@vercel/blob";
 import express from "express";
 import sql from "../src/config/db.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
-// --- 0. CHECK-INBOX (Düzeltildi) ---
 app.get("/check-inbox", async (req, res) => {
   try {
     const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
-    // Vercel Blob listeleme
     const { blobs } = await list({ prefix: `inbox/${userId}/` });
 
-    // Android tarafındaki BookResponse modeline uygun eşleme
     const results = blobs.map((b) => {
       const fileName = b.pathname.split("/").pop();
       return {
-        id: fileName.replace(".epub", "").replace(/\s/g, "_"), // Android id bekliyor
+        id: fileName.replace(".epub", "").replace(/\s/g, "_"),
         name: fileName,
         url: b.url,
         size: b.size,
@@ -27,12 +24,31 @@ app.get("/check-inbox", async (req, res) => {
 
     res.json(results);
   } catch (e) {
-    console.error("List Error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// --- 1. GMAIL EPUB INGEST ---
+app.delete("/remove-from-inbox", async (req, res) => {
+  try {
+    const { fileUrl, userId, bookId } = req.query;
+    if (!fileUrl) return res.status(400).json({ error: "fileUrl is required" });
+
+    await del(fileUrl);
+
+    if (userId && bookId) {
+      await sql`
+        DELETE FROM user_books 
+        WHERE user_id = ${userId} AND book_id = ${bookId}
+      `;
+    }
+
+    res.json({ status: "success", message: "Deleted from inbox" });
+  } catch (e) {
+    console.error("Delete Error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post("/ingest-email-book", async (req, res) => {
   const { userId, fileName, fileBlob } = req.body;
   if (!userId || !fileName || !fileBlob)
@@ -45,8 +61,6 @@ app.post("/ingest-email-book", async (req, res) => {
       contentType: "application/epub+zip",
     });
 
-    // Opsiyonel: Veritabanına da işlemek istersen burada bırakabilirsin
-    // Ama /check-inbox artık doğrudan Blob'dan okuduğu için DB zorunlu değil
     const bookId = fileName.replace(".epub", "").replace(/\s/g, "_");
     await sql`
       INSERT INTO user_books (user_id, book_id, file_name, file_url)
@@ -60,7 +74,6 @@ app.post("/ingest-email-book", async (req, res) => {
   }
 });
 
-// --- 2. AYARLARI SENKRONİZE ET ---
 app.post("/sync/settings", async (req, res) => {
   const { userId, readingMode, wordDisplayCount, timestamp } = req.body;
   try {
@@ -77,7 +90,6 @@ app.post("/sync/settings", async (req, res) => {
   }
 });
 
-// --- 3. İLERLEMEYİ KAYDET ---
 app.post("/sync/progress", async (req, res) => {
   const { userId, bookId, lastPartIndex, lastWordIndex, timestamp } = req.body;
   try {
@@ -96,7 +108,6 @@ app.post("/sync/progress", async (req, res) => {
   }
 });
 
-// --- 4. İLERLEMEYİ GETİR ---
 app.get("/sync/progress", async (req, res) => {
   const { userId, bookId } = req.query;
   try {
