@@ -1,43 +1,53 @@
 import express from "express";
 import sql from "../config/db.js";
+import { accountService } from "../services/accountService.js";
 
 const router = express.Router();
 
-// GET: /api/profiles/:accountId
-// Belirli bir hesaba (email) bağlı tüm profilleri getirir
-router.get("/:accountId", async (req, res) => {
-  const { accountId } = req.params;
-
+// Yeni Profil: POST /api/profiles
+router.post("/", async (req, res) => {
+  const { account_id, name, avatar_id } = req.body;
   try {
-    const profiles = await sql`
-      SELECT id, account_id, display_name, avatar_url, created_at 
-      FROM profiles 
-      WHERE account_id = ${accountId.toLowerCase().trim()}
-      ORDER BY created_at ASC
-    `;
-
-    res.json(profiles);
+    const newProfile = await accountService.createProfile(
+      account_id,
+      name,
+      avatar_id,
+    );
+    res.status(201).json(newProfile);
   } catch (e) {
-    console.error("Profile fetch error:", e);
-    res.status(500).json({ error: "Profiller getirilirken bir hata oluştu." });
+    res.status(500).json({ error: e.message });
   }
 });
 
-// GET: /api/profiles/detail/:profileId
-// Tek bir profilin detayını ID üzerinden getirir
-router.get("/detail/:profileId", async (req, res) => {
-  const { profileId } = req.params;
-
+// Profil Güncelleme: PUT /api/profiles/:id
+router.put("/:id", async (req, res) => {
   try {
-    const profile = await sql`
-      SELECT * FROM profiles WHERE id = ${profileId}
-    `;
+    const updated = await accountService.updateProfile(req.params.id, req.body);
+    res.json(updated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    if (profile.length === 0) {
-      return res.status(404).json({ error: "Profil bulunamadı." });
-    }
+// İlerleme Kaydı (Progress): POST /api/profiles/progress
+router.post("/progress", async (req, res) => {
+  const { profileId, bookId, lastPartIndex, lastWordIndex } = req.body;
+  try {
+    const [profile] =
+      await sql`SELECT book_progress_map FROM profiles WHERE id = ${profileId}`;
+    if (!profile) return res.status(404).json({ error: "Profil bulunamadı" });
 
-    res.json(profile[0]);
+    const updatedMap = {
+      ...(profile.book_progress_map || {}),
+      [bookId]: { lastPartIndex, lastWordIndex, updatedAt: new Date() },
+    };
+
+    await accountService.updateProfile(profileId, {
+      book_progress_map: updatedMap,
+      last_book_id: bookId,
+    });
+
+    res.json({ status: "success" });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
