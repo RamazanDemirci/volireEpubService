@@ -1,4 +1,4 @@
-import { put } from "@vercel/blob";
+import { list, put } from "@vercel/blob";
 import crypto from "crypto";
 import express from "express";
 import sql from "../config/db.js";
@@ -76,38 +76,42 @@ router.post("/ingest-email-book", async (req, res) => {
   }
 });
 
-// GET: /api/books/check-inbox
 router.get("/check-inbox", async (req, res) => {
   try {
-    const { email, profileId } = req.query; // İki parametre alalım
-    if (!email) return res.status(400).json({ error: "Email gerekli" });
+    // 1. Parametreleri al
+    const { email, profileId } = req.query;
 
-    // Eğer profileId gönderilmişse tam yolu hedefle,
-    // gönderilmemişse o mailin tüm inbox'ını tara
-    let prefix = `inbox/${email.trim().toLowerCase()}/`;
+    // API esnekliği: Sadece email gelirse mail klasörüne,
+    // profileId de gelirse spesifik profil klasörüne baksın.
+    const userId = email || profileId;
+
+    if (!userId)
+      return res.status(400).json({ error: "Email veya profileId gerekli" });
+
+    // 2. Klasör yolunu (prefix) oluştur
+    // Senin yapına göre: inbox/radem18@gmail.com/profile_w4jp2s5ho/
+    let targetPath = `inbox/${email.trim()}/`;
     if (profileId) {
-      prefix += `${profileId.trim()}/`;
+      targetPath += `${profileId.trim()}/`;
     }
 
-    console.log("Aranan Prefix:", prefix);
+    console.log("Aranan yol:", targetPath);
 
-    const { blobs } = await list({ prefix });
+    // 3. Vercel Blob listeleme (list artık yukarıda import edildiği için çalışacak)
+    const { blobs } = await list({ prefix: targetPath });
 
-    // Veritabanı ile eşleştirme yaparak orijinal isimleri getirsek daha iyi olur
-    // Ama şu anki yapıya göre blob listesini dönüyoruz:
-    const response = blobs.map((b) => ({
-      id: b.pathname.split("/").pop().replace(".epub", ""), // uuid
-      name: b.pathname.split("/").pop(), // Dosya adı (UUID.epub)
-      url: b.url,
-      size: b.size,
-      uploadedAt: b.uploadedAt,
-      // Path'den profil ID'sini ayıkla (inbox/email/profileId/uuid.epub)
-      profileId: b.pathname.split("/")[2],
-    }));
-
-    res.json(response);
+    // 4. Sonucu dön
+    res.json(
+      blobs.map((b) => ({
+        id: b.pathname.split("/").pop().replace(".epub", ""), // UUID kısmı
+        name: b.pathname.split("/").pop(), // Dosya adı
+        url: b.url,
+        size: b.size,
+        uploadedAt: b.uploadedAt,
+      })),
+    );
   } catch (e) {
-    console.error("Check Inbox Hatası:", e);
+    console.error("API Hatası:", e);
     res.status(500).json({ error: e.message });
   }
 });
