@@ -1,4 +1,4 @@
-import { list, put } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import crypto from "crypto";
 import express from "express";
 import sql from "../config/db.js";
@@ -76,21 +76,25 @@ router.post("/ingest-email-book", async (req, res) => {
   }
 });
 
-// GET: /api/books/check-inbox
+// GET: /api/books/check-inbox (Önerilen Model)
 router.get("/check-inbox", async (req, res) => {
-  try {
-    const { userId } = req.query; // Burada userId olarak account_id veya profile_id gelebilir
-    if (!userId) return res.status(400).json({ error: "userId gerekli" });
+  const { userId } = req.query; // radem18@gmail.com
 
-    const prefix = `inbox/${userId.trim()}/`;
-    const { blobs } = await list({ prefix });
+  try {
+    // Veritabanından bu kullanıcıya ait metadata'ları çek
+    // Not: DB şemanda userId veya email kolonu üzerinden filtreleme yapmalısın
+    const books = await sql`
+      SELECT id, original_name as name, url, file_hash 
+      FROM book_metadata 
+      WHERE url LIKE ${"%" + userId + "%"}
+    `;
 
     res.json(
-      blobs.map((b) => ({
-        name: b.pathname.split("/").pop(),
+      books.map((b) => ({
+        id: b.id,
+        name: b.name,
         url: b.url,
-        size: b.size,
-        uploadedAt: b.uploadedAt,
+        isLocal: false, // Android tarafı için yardımcı alan
       })),
     );
   } catch (e) {
