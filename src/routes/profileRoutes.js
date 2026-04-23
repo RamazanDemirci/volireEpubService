@@ -53,4 +53,27 @@ router.post("/progress", async (req, res) => {
   }
 });
 
+// Profil Silme: DELETE /api/profiles/:id
+router.delete("/:id", async (req, res) => {
+  try {
+    const profileId = req.params.id;
+
+    if (!profileId) {
+      return res.status(400).json({ error: "Profil ID zorunludur." });
+    }
+
+    await accountService.deleteProfile(profileId);
+
+    res.json({
+      status: "success",
+      message: "Profil başarıyla silindi.",
+    });
+  } catch (e) {
+    console.error("Delete Profile Error:", e);
+    res.status(e.message.includes("bulunamadı") ? 404 : 500).json({
+      error: e.message,
+    });
+  }
+});
+
 export default router;

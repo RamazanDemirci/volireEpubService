@@ -81,4 +81,17 @@ export const accountService = {
     `;
     return updated;
   },
+
+  // accountService nesnesinin içine ekle:
+  async deleteProfile(profileId) {
+    const [deleted] = await sql`
+    DELETE FROM profiles 
+    WHERE id = ${profileId} 
+    RETURNING id
+  `;
+    if (!deleted) {
+      throw new Error("Profil bulunamadı veya zaten silinmiş.");
+    }
+    return deleted;
+  },
 };
