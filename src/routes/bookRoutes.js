@@ -76,28 +76,38 @@ router.post("/ingest-email-book", async (req, res) => {
   }
 });
 
-// GET: /api/books/check-inbox (Önerilen Model)
+// GET: /api/books/check-inbox
 router.get("/check-inbox", async (req, res) => {
-  const { userId } = req.query; // radem18@gmail.com
-
   try {
-    // Veritabanından bu kullanıcıya ait metadata'ları çek
-    // Not: DB şemanda userId veya email kolonu üzerinden filtreleme yapmalısın
-    const books = await sql`
-      SELECT id, original_name as name, url, file_hash 
-      FROM book_metadata 
-      WHERE url LIKE ${"%" + userId + "%"}
-    `;
+    const { email, profileId } = req.query; // İki parametre alalım
+    if (!email) return res.status(400).json({ error: "Email gerekli" });
 
-    res.json(
-      books.map((b) => ({
-        id: b.id,
-        name: b.name,
-        url: b.url,
-        isLocal: false, // Android tarafı için yardımcı alan
-      })),
-    );
+    // Eğer profileId gönderilmişse tam yolu hedefle,
+    // gönderilmemişse o mailin tüm inbox'ını tara
+    let prefix = `inbox/${email.trim().toLowerCase()}/`;
+    if (profileId) {
+      prefix += `${profileId.trim()}/`;
+    }
+
+    console.log("Aranan Prefix:", prefix);
+
+    const { blobs } = await list({ prefix });
+
+    // Veritabanı ile eşleştirme yaparak orijinal isimleri getirsek daha iyi olur
+    // Ama şu anki yapıya göre blob listesini dönüyoruz:
+    const response = blobs.map((b) => ({
+      id: b.pathname.split("/").pop().replace(".epub", ""), // uuid
+      name: b.pathname.split("/").pop(), // Dosya adı (UUID.epub)
+      url: b.url,
+      size: b.size,
+      uploadedAt: b.uploadedAt,
+      // Path'den profil ID'sini ayıkla (inbox/email/profileId/uuid.epub)
+      profileId: b.pathname.split("/")[2],
+    }));
+
+    res.json(response);
   } catch (e) {
+    console.error("Check Inbox Hatası:", e);
     res.status(500).json({ error: e.message });
   }
 });
