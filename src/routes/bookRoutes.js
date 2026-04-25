@@ -78,38 +78,60 @@ router.post("/ingest-email-book", async (req, res) => {
 
 router.get("/check-inbox", async (req, res) => {
   try {
-    // 1. Parametreleri al
     const { email, profileId } = req.query;
 
-    // API esnekliği: Sadece email gelirse mail klasörüne,
-    // profileId de gelirse spesifik profil klasörüne baksın.
-    const userId = email || profileId;
+    if (!email)
+      return res.status(400).json({ error: "Email parametresi gerekli" });
 
-    if (!userId)
-      return res.status(400).json({ error: "Email veya profileId gerekli" });
-
-    // 2. Klasör yolunu (prefix) oluştur
-    // Senin yapına göre: inbox/radem18@gmail.com/profile_w4jp2s5ho/
+    // 1. Klasör yolunu oluştur
     let targetPath = `inbox/${email.trim()}/`;
     if (profileId) {
       targetPath += `${profileId.trim()}/`;
     }
 
-    console.log("Aranan yol:", targetPath);
-
-    // 3. Vercel Blob listeleme (list artık yukarıda import edildiği için çalışacak)
+    // 2. Vercel Blob listesini al
     const { blobs } = await list({ prefix: targetPath });
 
-    // 4. Sonucu dön
-    res.json(
-      blobs.map((b) => ({
-        id: b.pathname.split("/").pop().replace(".epub", ""), // UUID kısmı
-        name: b.pathname.split("/").pop(), // Dosya adı
+    if (blobs.length === 0) return res.json([]);
+
+    // 3. Blob'lardan ID listesi (UUID) oluştur
+    const blobData = blobs.map((b) => {
+      const fileName = b.pathname.split("/").pop();
+      return {
+        id: fileName.replace(".epub", ""),
+        fileName: fileName,
         url: b.url,
         size: b.size,
         uploadedAt: b.uploadedAt,
-      })),
+      };
+    });
+
+    const ids = blobData.map((b) => b.id);
+
+    // 4. Veri tabanından original_name bilgilerini çek
+    // Not: db.query senin kullandığın DB kütüphanesine göre (pg, mysql vb.) değişebilir
+    const { rows } = await db.query(
+      "SELECT id, original_name FROM book_metadata WHERE id = ANY($1)",
+      [ids],
     );
+
+    // ID-Name eşleşmesi için bir map oluştur
+    const nameMap = {};
+    rows.forEach((row) => {
+      nameMap[row.id] = row.original_name;
+    });
+
+    // 5. Blob verisini veri tabanı isimleriyle birleştir
+    const response = blobData.map((b) => ({
+      id: b.id,
+      // Veri tabanında varsa original_name, yoksa dosya adını göster
+      name: nameMap[b.id] || b.fileName,
+      url: b.url,
+      size: b.size,
+      uploadedAt: b.uploadedAt,
+    }));
+
+    res.json(response);
   } catch (e) {
     console.error("API Hatası:", e);
     res.status(500).json({ error: e.message });
