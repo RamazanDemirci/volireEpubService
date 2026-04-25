@@ -79,18 +79,14 @@ router.post("/ingest-email-book", async (req, res) => {
 router.get("/check-inbox", async (req, res) => {
   try {
     const { email, profileId } = req.query;
-
     if (!email) return res.status(400).json({ error: "Email gerekli" });
 
-    // 1. Klasör yolunu oluştur
     let targetPath = `inbox/${email.trim()}/`;
     if (profileId) targetPath += `${profileId.trim()}/`;
 
-    // 2. Blob listesini al
     const { blobs } = await list({ prefix: targetPath });
-    if (blobs.length === 0) return res.json([]);
+    if (!blobs || blobs.length === 0) return res.json([]);
 
-    // 3. Blob'ları map'le
     const blobData = blobs.map((b) => {
       const fileName = b.pathname.split("/").pop();
       return {
@@ -102,27 +98,36 @@ router.get("/check-inbox", async (req, res) => {
       };
     });
 
-    // 4. SQL Sorgusu (Vercel Postgres Örneği)
     const ids = blobData.map((b) => b.id);
-
-    // Veri tabanından isimleri çekiyoruz
-    // sql`query` yazımı Vercel Postgres için standarttır
-    const { rows } = await sql`
-      SELECT id, original_name 
-      FROM book_metadata 
-      WHERE id = ANY(${ids})
-    `;
-
-    // ID -> Name eşleşmesi oluştur
     const nameMap = {};
-    rows.forEach((row) => {
-      nameMap[row.id] = row.original_name;
-    });
 
-    // 5. Birleştir ve Dön
+    try {
+      // Postgres dizisi formatına dönüştürme: {id1,id2,id3}
+      const pgArray = `{${ids.join(",")}}`;
+
+      // Vercel Postgres'te sql fonksiyonu bazen doğrudan dizi bazen sonuç nesnesi döner
+      const result = await sql`
+        SELECT id, original_name 
+        FROM book_metadata 
+        WHERE id = ANY(${pgArray}::varchar[])
+      `;
+
+      // 'rows' undefined ise 'result' nesnesinin kendisine veya 'result.rows'a bak
+      const rows = result.rows || (Array.isArray(result) ? result : []);
+
+      if (rows && Array.isArray(rows)) {
+        rows.forEach((row) => {
+          nameMap[row.id] = row.original_name;
+        });
+      }
+    } catch (dbError) {
+      console.error("DB Sorgu Hatası (Sessiz):", dbError);
+      // Veritabanı hatası olsa bile uygulama çökmemeli, UUID ile devam etmeli.
+    }
+
     const response = blobData.map((b) => ({
       id: b.id,
-      // Metadata'da varsa temiz isim, yoksa dosya adı
+      // Eğer DB'den isim geldiyse onu kullan, yoksa UUID dosya adını
       name: nameMap[b.id] || b.fileName,
       url: b.url,
       size: b.size,
@@ -131,9 +136,8 @@ router.get("/check-inbox", async (req, res) => {
 
     res.json(response);
   } catch (e) {
-    console.error("API Hatası:", e);
-    // Hata mesajını daha detaylı dönmek için
-    res.status(500).json({ error: e.message, stack: e.stack });
+    console.error("Genel API Hatası:", e);
+    res.status(500).json({ error: e.message });
   }
 });
 
