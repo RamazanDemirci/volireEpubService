@@ -141,4 +141,18 @@ router.get("/check-inbox", async (req, res) => {
   }
 });
 
+router.post("/rename-book", async (req, res) => {
+  const { profileId, bookId, newName } = req.body;
+
+  // profile_books tablosuna UPSERT (varsa güncelle yoksa ekle) işlemi yapılır
+  await sql`
+    INSERT INTO profile_books (profile_id, book_id, display_name)
+    VALUES (${profileId}, ${bookId}, ${newName})
+    ON CONFLICT (profile_id, book_id) 
+    DO UPDATE SET display_name = ${newName}
+  `;
+
+  res.json({ success: true });
+});
+
 export default router;
