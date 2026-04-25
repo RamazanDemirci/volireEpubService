@@ -141,18 +141,20 @@ router.get("/check-inbox", async (req, res) => {
   }
 });
 
-router.post("/rename-book", async (req, res) => {
-  const { profileId, bookId, newName } = req.body;
+router.post("/rename", async (req, res) => {
+  const { bookId, profileId, newName } = req.body;
 
-  // profile_books tablosuna UPSERT (varsa güncelle yoksa ekle) işlemi yapılır
-  await sql`
-    INSERT INTO profile_books (profile_id, book_id, display_name)
-    VALUES (${profileId}, ${bookId}, ${newName})
-    ON CONFLICT (profile_id, book_id) 
-    DO UPDATE SET display_name = ${newName}
-  `;
-
-  res.json({ success: true });
+  try {
+    await sql`
+      INSERT INTO profile_books (profile_id, book_id, display_name)
+      VALUES (${profileId}, ${bookId}, ${newName})
+      ON CONFLICT (profile_id, book_id) 
+      DO UPDATE SET display_name = ${newName}
+    `;
+    res.status(200).json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;
