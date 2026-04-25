@@ -66,9 +66,8 @@ export const accountService = {
     return newProfile;
   },
 
-async updateProfile(profileId, data) {
-  // data içindeki keyler CamelCase gelirse (Android'den), SQL Snake_case olmalı
-  const [updated] = await sql`
+  async updateProfile(profileId, data) {
+    const [updated] = await sql`
     UPDATE profiles SET
       name = ${data.name || sql`name`},
       avatar_id = ${data.avatarResId || data.avatar_id || sql`avatar_id`},
@@ -80,8 +79,8 @@ async updateProfile(profileId, data) {
     WHERE id = ${profileId}
     RETURNING ${this.PROFILE_SELECT_FIELDS}
   `;
-  return updated;
-}
+    return updated;
+  },
 
   // accountService nesnesinin içine ekle:
   async deleteProfile(profileId) {
