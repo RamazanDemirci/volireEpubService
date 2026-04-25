@@ -66,21 +66,22 @@ export const accountService = {
     return newProfile;
   },
 
-  async updateProfile(profileId, data) {
-    const [updated] = await sql`
-      UPDATE profiles SET
-        name = ${data.name || sql`name`},
-        avatar_id = ${data.avatar_id || sql`avatar_id`},
-        settings = ${data.settings ? sql.json(data.settings) : sql`settings`},
-        reader_params = ${data.reader_params ? sql.json(data.reader_params) : sql`reader_params`},
-        last_book_id = ${data.last_book_id || sql`last_book_id`},
-        library_book_ids = ${data.library_book_ids ? sql.array(data.library_book_ids) : sql`library_book_ids`},
-        book_progress_map = ${data.book_progress_map ? sql.json(data.book_progress_map) : sql`book_progress_map`}
-      WHERE id = ${profileId}
-      RETURNING ${this.PROFILE_SELECT_FIELDS}
-    `;
-    return updated;
-  },
+async updateProfile(profileId, data) {
+  // data içindeki keyler CamelCase gelirse (Android'den), SQL Snake_case olmalı
+  const [updated] = await sql`
+    UPDATE profiles SET
+      name = ${data.name || sql`name`},
+      avatar_id = ${data.avatarResId || data.avatar_id || sql`avatar_id`},
+      settings = ${data.settings ? sql.json(data.settings) : sql`settings`},
+      reader_params = ${data.readerParams || data.reader_params ? sql.json(data.readerParams || data.reader_params) : sql`reader_params`},
+      last_book_id = ${data.lastBookId || data.last_book_id || sql`last_book_id`},
+      library_book_ids = ${data.libraryBookIds || data.library_book_ids ? sql.array(data.libraryBookIds || data.library_book_ids) : sql`library_book_ids`},
+      book_progress_map = ${data.bookProgressMap || data.book_progress_map ? sql.json(data.bookProgressMap || data.book_progress_map) : sql`book_progress_map`}
+    WHERE id = ${profileId}
+    RETURNING ${this.PROFILE_SELECT_FIELDS}
+  `;
+  return updated;
+}
 
   // accountService nesnesinin içine ekle:
   async deleteProfile(profileId) {

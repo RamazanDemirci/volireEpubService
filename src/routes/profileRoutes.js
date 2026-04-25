@@ -29,26 +29,45 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// İlerleme Kaydı (Progress): POST /api/profiles/progress
 router.post("/progress", async (req, res) => {
   const { profileId, bookId, lastPartIndex, lastWordIndex } = req.body;
+
+  if (!profileId || !bookId) {
+    return res
+      .status(400)
+      .json({ error: "Eksik parametre: profileId veya bookId" });
+  }
+
   try {
+    // 1. Mevcut profili ham sütun adıyla çek
     const [profile] =
       await sql`SELECT book_progress_map FROM profiles WHERE id = ${profileId}`;
+
     if (!profile) return res.status(404).json({ error: "Profil bulunamadı" });
 
+    // 2. Map güncelleme (Snake_case sütun ismine dikkat)
+    const currentMap = profile.book_progress_map || {};
     const updatedMap = {
-      ...(profile.book_progress_map || {}),
-      [bookId]: { lastPartIndex, lastWordIndex, updatedAt: new Date() },
+      ...currentMap,
+      [bookId]: {
+        lastPartIndex: parseInt(lastPartIndex),
+        lastWordIndex: parseInt(lastWordIndex),
+        updatedAt: new Date().toISOString(), // Android'de String bekliyoruz
+      },
     };
 
-    await accountService.updateProfile(profileId, {
-      book_progress_map: updatedMap,
-      last_book_id: bookId,
-    });
+    // 3. Veritabanına yaz
+    await sql`
+      UPDATE profiles SET
+        book_progress_map = ${sql.json(updatedMap)},
+        last_book_id = ${bookId},
+        updated_at = NOW()
+      WHERE id = ${profileId}
+    `;
 
     res.json({ status: "success" });
   } catch (e) {
+    console.error("Progress Kayıt Hatası:", e);
     res.status(500).json({ error: e.message });
   }
 });
