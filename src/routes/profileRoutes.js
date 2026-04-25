@@ -29,45 +29,61 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+// İlerleme Kaydı (Progress): POST /api/profiles/progress
 router.post("/progress", async (req, res) => {
   const { profileId, bookId, lastPartIndex, lastWordIndex } = req.body;
 
-  if (!profileId || !bookId) {
-    return res
-      .status(400)
-      .json({ error: "Eksik parametre: profileId veya bookId" });
-  }
-
   try {
-    // 1. Mevcut profili ham sütun adıyla çek
-    const [profile] =
-      await sql`SELECT book_progress_map FROM profiles WHERE id = ${profileId}`;
+    // 1. İşlemi transaction (başlat-bitir) içine alıyoruz ki iki tablo da aynı anda güncellensin
+    await sql.begin(async (sql) => {
+      // A) profiles tablosundaki JSON haritasını güncelle (Mevcut mantık)
+      const [profile] =
+        await sql`SELECT book_progress_map FROM profiles WHERE id = ${profileId}`;
+      if (!profile) throw new Error("Profil bulunamadı");
 
-    if (!profile) return res.status(404).json({ error: "Profil bulunamadı" });
+      const updatedMap = {
+        ...(profile.book_progress_map || {}),
+        [bookId]: {
+          lastPartIndex: parseInt(lastPartIndex),
+          lastWordIndex: parseInt(lastWordIndex),
+          updatedAt: new Date(),
+        },
+      };
 
-    // 2. Map güncelleme (Snake_case sütun ismine dikkat)
-    const currentMap = profile.book_progress_map || {};
-    const updatedMap = {
-      ...currentMap,
-      [bookId]: {
-        lastPartIndex: parseInt(lastPartIndex),
-        lastWordIndex: parseInt(lastWordIndex),
-        updatedAt: new Date().toISOString(), // Android'de String bekliyoruz
-      },
-    };
+      await sql`
+        UPDATE profiles SET 
+          book_progress_map = ${sql.json(updatedMap)},
+          last_book_id = ${bookId}
+        WHERE id = ${profileId}
+      `;
 
-    // 3. Veritabanına yaz
-    await sql`
-      UPDATE profiles SET
-        book_progress_map = ${sql.json(updatedMap)},
-        last_book_id = ${bookId},
-        updated_at = NOW()
-      WHERE id = ${profileId}
-    `;
+      // B) book_progress tablosuna satır olarak ekle veya varsa güncelle
+      // Tablo şemandaki kolon isimlerine (profile_id, book_id) sadık kalıyoruz
+      await sql`
+        INSERT INTO book_progress (
+          profile_id, 
+          book_id, 
+          last_part_index, 
+          last_word_index, 
+          updated_at
+        ) VALUES (
+          ${profileId}, 
+          ${bookId}, 
+          ${parseInt(lastPartIndex)}, 
+          ${parseInt(lastWordIndex)}, 
+          ${Date.now()}
+        )
+        ON CONFLICT (profile_id, book_id) 
+        DO UPDATE SET 
+          last_part_index = EXCLUDED.last_part_index,
+          last_word_index = EXCLUDED.last_word_index,
+          updated_at = EXCLUDED.updated_at
+      `;
+    });
 
     res.json({ status: "success" });
   } catch (e) {
-    console.error("Progress Kayıt Hatası:", e);
+    console.error("Progress Hatası:", e);
     res.status(500).json({ error: e.message });
   }
 });
