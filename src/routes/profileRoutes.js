@@ -29,23 +29,26 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// İlerleme Kaydı (Progress): POST /api/profiles/progress
+// router.post("/progress", ...) içeriğini şununla değiştir:
 router.post("/progress", async (req, res) => {
-  const { profileId, bookId, lastPartIndex, lastWordIndex } = req.body;
+  // Destructuring kısmını yeni isimlere göre güncelledik
+  const { profileId, bookId, lastPartIndex, pageStart, pageEnd, percentage } =
+    req.body;
 
   try {
-    // 1. İşlemi transaction (başlat-bitir) içine alıyoruz ki iki tablo da aynı anda güncellensin
     await sql.begin(async (sql) => {
-      // A) profiles tablosundaki JSON haritasını güncelle (Mevcut mantık)
       const [profile] =
         await sql`SELECT book_progress_map FROM profiles WHERE id = ${profileId}`;
       if (!profile) throw new Error("Profil bulunamadı");
 
+      // A) JSON Map Güncelleme
       const updatedMap = {
         ...(profile.book_progress_map || {}),
         [bookId]: {
           lastPartIndex: parseInt(lastPartIndex),
-          lastWordIndex: parseInt(lastWordIndex),
+          pageStart: parseInt(pageStart || 0), // lastWordIndex yerine pageStart
+          pageEnd: parseInt(pageEnd || 0),
+          percentage: parseInt(percentage || 0),
           updatedAt: new Date(),
         },
       };
@@ -57,21 +60,18 @@ router.post("/progress", async (req, res) => {
         WHERE id = ${profileId}
       `;
 
-      // B) book_progress tablosuna satır olarak ekle veya varsa güncelle
-      // Tablo şemandaki kolon isimlerine (profile_id, book_id) sadık kalıyoruz
+      // B) book_progress tablosu (Kolon isimlerin veritabanında neyse ona göre eşle)
+      // Eğer veritabanında kolon isimlerini değiştirmediysen last_word_index'e pageStart'ı yazabilirsin
+      // Ama en temizi kolon isimlerini de (page_start, page_end) olarak migrate etmektir.
       await sql`
         INSERT INTO book_progress (
-          profile_id, 
-          book_id, 
-          last_part_index, 
-          last_word_index, 
-          updated_at
+          profile_id, book_id, last_part_index, last_word_index, updated_at
         ) VALUES (
           ${profileId}, 
           ${bookId}, 
           ${parseInt(lastPartIndex)}, 
-          ${parseInt(lastWordIndex)}, 
-          ${Date.now()}
+          ${parseInt(pageStart || 0)}, 
+          ${new Date()}
         )
         ON CONFLICT (profile_id, book_id) 
         DO UPDATE SET 
@@ -87,7 +87,6 @@ router.post("/progress", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
 // Profil Silme: DELETE /api/profiles/:id
 router.delete("/:id", async (req, res) => {
   try {
