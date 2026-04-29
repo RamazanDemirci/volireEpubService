@@ -29,26 +29,24 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// router.post("/progress", ...) içeriğini şununla değiştir:
 router.post("/progress", async (req, res) => {
-  // Destructuring kısmını yeni isimlere göre güncelledik
   const { profileId, bookId, lastPartIndex, pageStart, pageEnd, percentage } =
     req.body;
 
   try {
     await sql.begin(async (sql) => {
+      // A) profiles tablosundaki JSON haritasını güncelle
       const [profile] =
         await sql`SELECT book_progress_map FROM profiles WHERE id = ${profileId}`;
       if (!profile) throw new Error("Profil bulunamadı");
 
-      // A) JSON Map Güncelleme
       const updatedMap = {
         ...(profile.book_progress_map || {}),
         [bookId]: {
           lastPartIndex: parseInt(lastPartIndex),
-          pageStart: parseInt(pageStart || 0), // lastWordIndex yerine pageStart
-          pageEnd: parseInt(pageEnd || 0),
-          percentage: parseInt(percentage || 0),
+          pageStart: parseInt(pageStart), // Yeni isim
+          pageEnd: parseInt(pageEnd), // Yeni isim
+          percentage: parseInt(percentage),
           updatedAt: new Date(),
         },
       };
@@ -60,33 +58,31 @@ router.post("/progress", async (req, res) => {
         WHERE id = ${profileId}
       `;
 
-      // B) book_progress tablosu (Kolon isimlerin veritabanında neyse ona göre eşle)
-      // Eğer veritabanında kolon isimlerini değiştirmediysen last_word_index'e pageStart'ı yazabilirsin
-      // Ama en temizi kolon isimlerini de (page_start, page_end) olarak migrate etmektir.
+      // B) book_progress tablosuna satır olarak ekle/güncelle
       await sql`
         INSERT INTO book_progress (
-          profile_id, book_id, last_part_index, last_word_index, updated_at
+          profile_id, book_id, last_part_index, page_start, page_end, percentage, updated_at
         ) VALUES (
-          ${profileId}, 
-          ${bookId}, 
-          ${parseInt(lastPartIndex)}, 
-          ${parseInt(pageStart || 0)}, 
-          ${new Date()}
+          ${profileId}, ${bookId}, ${parseInt(lastPartIndex)}, 
+          ${parseInt(pageStart)}, ${parseInt(pageEnd)}, ${parseInt(percentage)}, 
+          ${Date.now()}
         )
         ON CONFLICT (profile_id, book_id) 
         DO UPDATE SET 
           last_part_index = EXCLUDED.last_part_index,
-          last_word_index = EXCLUDED.last_word_index,
+          page_start = EXCLUDED.page_start,
+          page_end = EXCLUDED.page_end,
+          percentage = EXCLUDED.percentage,
           updated_at = EXCLUDED.updated_at
       `;
     });
 
     res.json({ status: "success" });
   } catch (e) {
-    console.error("Progress Hatası:", e);
     res.status(500).json({ error: e.message });
   }
 });
+
 // Profil Silme: DELETE /api/profiles/:id
 router.delete("/:id", async (req, res) => {
   try {
